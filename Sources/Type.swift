@@ -36,7 +36,7 @@ public enum ScriptType {
     ///    - isIgnoreOutput: 是否忽略输出。如果为true，则通过Exector.xxxStreamNotify输出
     ///    - environment: 环境变量。一般为需要先以export定义某变量才能正确执行的脚本才设置
     ///    - input: 输入文件路径。脚本需要输入文件时有效
-    case process(isIgnoreOutput: Bool, environment: EnvironmentType?, input: String?)
+    case process(isIgnoreOutput: Bool, environment: @autoclosure () -> EnvironmentType?, input: @autoclosure () -> String?)
     
     /// 系统Apple类型
     /// - attention: arguments内的参数如果存在 "（能用'代替最好，就无需反斜杠）或其他需要转义的字符，需要使用2+1反斜杠+转义字符，例如： `git -C \\\"path/to/destination\\\"`
@@ -52,7 +52,17 @@ extension ScriptType {
     /// 通用型AppleScript 无需管理员身份
     public static let generalApple = apple(isAsAdministrator: false)
     /// 通用型Process 忽略输出
-    public static let generalProcess = process(isIgnoreOutput: true, environment: nil, input: nil)
+    public static func generalProcess(ignore: Bool = true) -> Self {
+        process(isIgnoreOutput: ignore, environment: nil, input: nil)
+    }
+}
+
+extension ScriptType.EnvironmentType {
+    /// 开发路径变量
+    public static let DEVELOPER_DIR = ["DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"]
+    /// 语言变量 - 英文
+    public static let LANG_en_US = ["LANG": "en_US.UTF-8"]
+    
 }
 
 extension ScriptType {
@@ -83,22 +93,12 @@ extension ScriptType {
     /// 输入文件
     public var inputFile: String? {
         guard case .process(isIgnoreOutput: _, environment: _, input: let ret) = self else { return nil }
-        return ret
+        return ret()
     }
     
     /// 环境变量
     public var environment: [String: String]? {
         guard case .process(_, let env, _) = self else { return nil }
-        return env
-    }
-}
-
-extension ScriptType {
-    /// process环境变量
-    public enum Environment {
-        /// 开发路径变量
-        public static let DEVELOPER_DIR = ["DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"]
-        /// 语言变量 - 英文
-        public static let LANG_en_US = ["LANG": "en_US.UTF-8"]
+        return env()
     }
 }

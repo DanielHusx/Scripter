@@ -35,6 +35,17 @@ struct ContentView: View {
                     viewModel.echo_print()
                 }
             }
+            
+            Button("Git Current Branch By User") {
+                Task {
+                    viewModel.git_currentBranchByProcess()
+                }
+            }
+            Button("Git Current Branch By Apple") {
+                Task {
+                    viewModel.git_currentBranchByApple()
+                }
+            }
         }
         .padding()
     }

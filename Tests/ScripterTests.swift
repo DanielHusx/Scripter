@@ -38,5 +38,5 @@ extension ScripterTests {
         try common(.symbolicatecrash, contain: "Resources/symbolicatecrash")
     }
     
-    
 }
+

@@ -1,0 +1,34 @@
+/* 
+  Localizable.strings
+  SerendipityScriptSDK
+  
+*/
+
+
+"unknown_error" = "unknown error";
+
+// channel
+"ad_hoc" = "Ad Hoc";
+"app_store" = "Application Store";
+"development" = "Development";
+"enterprise" = "Enterprise";
+"unknown_channel" = "Unknown Channel";
+
+// scripterror
+"unsupported_script_type %@" = "Unsupported script type: %@";
+"invalid_script: %@" = "Invalid script: %@";
+"%@ executed_script_failed %@" = "Executed the '%@' script failed: %@";
+
+// termination reason
+"process_reason_exit" = "exited normally";
+"process_uncaught_signal" = "exited due to an uncatchedSignal";
+"unknown_reason %d" = "unknown reason: %d";
+
+// invaild reason
+"path_empty" = "script path is empty";
+"%@ path_not_exist_or_directory" = "the '%@' not exist or not a file";
+"%@ path_permission_denied" = "the '%@' is not authorized to access";
+
+// serialization reason
+"json_serialization_error" = "JSON serialization failed: %@";
+"property_list_serialization_error" = "PropertyList serialization failed: %@";

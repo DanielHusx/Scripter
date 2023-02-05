@@ -31,7 +31,7 @@ extension String {
     var script_localized: String {
         NSLocalizedString(self,
                           tableName: nil,
-                          bundle: Bundle(for: ScriptExecutor.self),
+                          bundle: Bundle.module,
                           value: "",
                           comment: "")
     }

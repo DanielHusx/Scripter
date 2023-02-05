@@ -25,7 +25,7 @@
 
 import Foundation
 
-/// ruby脚本语言
+/// `ruby`脚本语言
 public struct Ruby: Script {
     public var path: String?
     public var arguments: [String]?
@@ -38,7 +38,7 @@ public struct Ruby: Script {
     }
     
     /// ruby构建基本命令
-    public init(_ type: ScriptType = .process(isIgnoreOutput: false, environment: ScriptType.Environment.LANG_en_US, input: nil)) {
+    public init(_ type: ScriptType = .process(isIgnoreOutput: false, environment: .LANG_en_US, input: nil)) {
         self.init(.ruby, type: type)
     }
     

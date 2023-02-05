@@ -27,6 +27,8 @@ import Foundation
 
 extension String {
     /// 用于AppleScript脚本的地址参数
+    /// 
+    /// - attention: 当执行Process脚本时尽量别使用此方法，可能会导致反馈找不到该路径
     public var appleScriptPath: String {
         "'" + self + "'"
     }

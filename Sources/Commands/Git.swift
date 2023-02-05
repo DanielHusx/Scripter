@@ -55,14 +55,12 @@ public struct Git: Script {
     public func command(
         options: [GitOption]? = nil,
         commands: [GitCommand]? = nil,
-        commandOptions: [GitOption]? = nil,
         reserve: [String]? = nil
     ) -> Self {
         var arguments = self.arguments ?? []
         
-        if let options = options { arguments.append(contentsOf: options.map { $0.rawValue }) }
-        if let commands = commands { arguments.append(contentsOf: commands.map { $0.rawValue }) }
-        if let commandOptions = commandOptions { arguments.append(contentsOf: commandOptions.map{ $0.rawValue }) }
+        if let options = options { arguments.append(contentsOf: options.map(\.rawValue).flatMap({ $0 })) }
+        if let commands = commands { arguments.append(contentsOf: commands.map(\.rawValue).flatMap({ $0 })) }
         if let reserve = reserve { arguments.append(contentsOf: reserve) }
             
         return duplicate(arguments)
@@ -70,22 +68,54 @@ public struct Git: Script {
 }
 
 extension Git {
+    /// git选项
+    public struct GitOption: Hashable {
+        public let rawValue: [String]
+        public init(rawValue: String...) { self.rawValue = rawValue }
+        
+        /// 指定git在目标文档路径下运行git命令。 当给出多个 -C 选项时，每个后续的非绝对 -C <path> 都相对于前面的 -C <path> 进行解释。
+        /// 此选项会影响期望路径名的选项，例如 --git-dir 和 --work-tree，因为它们对路径名的解释将相对于由 -C 选项引起的工作目录进行。 例如，以下调用是等效的：
+        /// `git --git-dir=a.git --work-tree=b -C c status`
+        /// `git --git-dir=c/a.git --work-tree=c/b status`
+        public static func gitDirectory(_ directory: String) -> Self { GitOption(rawValue: "-C", directory) }
+        /// git版本
+        public static let version = GitOption(rawValue: "--version")
+        /// 将配置参数传递给命令。 给定的值将覆盖配置文件中的值。 <name> 应该与 git config 列出的格式相同（子键用点分隔）。 请注意，允许在 git -c foo.bar ... 中省略 = 并将 foo.bar 设置为布尔真值（就像 [foo]bar 在配置文件中所做的那样）。 包括等于但具有空值（如 git -c foo.bar= ...）将 foo.bar 设置为 git config --type=bool 将转换为 false 的空字符串。
+        public static func configuration(_ name: String, _ value: String) -> Self { GitOption(rawValue: "-c", "\(name)=\(value)") }
+        
+        public static func exec_path(_ path: String?) -> Self { GitOption(rawValue: "--exec-path\(path == nil ? "" : ("=" + path!))") }
+        public static func htmp_path(_ path: String) -> Self { GitOption(rawValue: "--html-path", path) }
+        public static func man_path(_ path: String) -> Self { GitOption(rawValue: "--man-path", path) }
+        public static func info_path(_ path: String) -> Self { GitOption(rawValue: "--info-path", path) }
+        public static let paginate = GitOption(rawValue: "--paginate")
+        public static let no_pager = GitOption(rawValue: "--no-pager")
+        /// `git --git-dir=/path/to/directory/.git`与`git -C /path/to/directory` 等价
+        public static func git_dir(_ path: String) -> Self { GitOption(rawValue: "--git-dir=\(path)") }
+        public static func work_tree(_ path: String) -> Self { GitOption(rawValue: "--work-tree=\(path)") }
+        public static func namespace(_ path: String) -> Self { GitOption(rawValue: "--namespace=\(path)") }
+        public static func super_prefix(_ path: String) -> Self { GitOption(rawValue: "--super-prefix=\(path)") }
+        public static let bare = GitOption(rawValue: "--bare")
+        public static let no_replace_objects = GitOption(rawValue: "--no-replace-objects")
+        public static let literal_pathspecs = GitOption(rawValue: "--literal-pathspecs")
+        public static let glob_pathspecs = GitOption(rawValue: "--glob-pathspecs")
+        public static let noglob_pathspecs = GitOption(rawValue: "--noglob-pathspecs")
+        public static let icase_pathspecs = GitOption(rawValue: "--icase-pathspecs")
+        public static let no_optional_locks = GitOption(rawValue: "--no-optional-locks")
+        public static func list_cmds(_ groups: [String]) -> Self { GitOption(rawValue:"--list-cmds=\(groups.joined(separator: ","))") }
+        
+    }
+    
     /// git命令类型
     public struct GitCommand: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
+        public let rawValue: [String]
+        public init(rawValue: [String]) { self.rawValue = rawValue }
+        public init(rawValue: String...) { self.rawValue = rawValue }
         
-        /// 克隆仓库到一个新的目录
-        public static let clone = GitCommand(rawValue: "clone")
         /// 创建一个空的 Git 仓库或重新初始化一个已存在的仓库
         public static let initial = GitCommand(rawValue: "init")
         
-        /// 添加文件内容至索引
-        public static let add = GitCommand(rawValue: "add")
         /// 移动或重命名一个文件、目录或符号链接
         public static let mv = GitCommand(rawValue: "mv")
-        /// 重置当前 HEAD 到指定状态
-        public static let reset = GitCommand(rawValue: "reset")
         /// 从工作区和索引中删除文件
         public static let rm = GitCommand(rawValue: "rm")
         
@@ -93,17 +123,8 @@ extension Git {
         public static let bisect = GitCommand(rawValue: "bisect")
         /// 输出和模式匹配的行
         public static let grep = GitCommand(rawValue: "grep")
-        /// 显示提交日志
-        public static let log = GitCommand(rawValue: "log")
         /// 显示各种类型的对象
         public static let show = GitCommand(rawValue: "show")
-        /// 显示工作区状态
-        public static let status = GitCommand(rawValue: "status")
-        
-        /// 列出、创建或删除分支
-        public static let branch = GitCommand(rawValue: "branch")
-        /// 切换分支或恢复工作区文件
-        public static func checkout(_ branch: String?) -> Self { GitCommand(rawValue: "checkout \(branch ?? "")") }
         /// 记录变更到仓库
         public static let commit = GitCommand(rawValue: "commit")
         /// 显示提交之间、提交和工作区之间等的差异
@@ -112,8 +133,6 @@ extension Git {
         public static let merge = GitCommand(rawValue: "merge")
         /// 在另一个分支上重新应用提交
         public static let rebase = GitCommand(rawValue: "rebase")
-        /// 创建、列出、删除或校验一个 GPG 签名的标签对象
-        public static let tag = GitCommand(rawValue: "tag")
         
         /// 从另外一个仓库下载对象和引用
         public static let fetch = GitCommand(rawValue: "fetch")
@@ -129,52 +148,38 @@ extension Git {
         /// 从工作目录中清除未跟踪的文件
         public static let clean = GitCommand(rawValue: "clean")
         
-        
     }
     
-    /// git选项
-    public struct GitOption: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
+}
+
+extension Git.GitCommand {
+    /// 克隆仓库到一个新的目录
+    public static func clone(_ repository: String, options: [CloneOption]? = nil, directory: String? = nil) -> Self {
+        var ret = ["clone"]
         
-        /// 指定git在目标文档路径下运行git命令。 当给出多个 -C 选项时，每个后续的非绝对 -C <path> 都相对于前面的 -C <path> 进行解释。
-        /// 此选项会影响期望路径名的选项，例如 --git-dir 和 --work-tree，因为它们对路径名的解释将相对于由 -C 选项引起的工作目录进行。 例如，以下调用是等效的：
-        /// git --git-dir=a.git --work-tree=b -C c status
-        /// git --git-dir=c/a.git --work-tree=c/b status
-        public static func gitDirectory(_ directory: String) -> Self { GitOption(rawValue: "-C \(directory.appleScriptPath)") }
-        /// git版本
-        public static let version = GitOption(rawValue: "--version")
-        /// 将配置参数传递给命令。 给定的值将覆盖配置文件中的值。 <name> 应该与 git config 列出的格式相同（子键用点分隔）。 请注意，允许在 git -c foo.bar ... 中省略 = 并将 foo.bar 设置为布尔真值（就像 [foo]bar 在配置文件中所做的那样）。 包括等于但具有空值（如 git -c foo.bar= ...）将 foo.bar 设置为 git config --type=bool 将转换为 false 的空字符串。
-        public static func configuration(_ name: String, _ value: String) -> Self { GitOption(rawValue: "-c \(name)=\(value)") }
+        if let options = options?.map(\.rawValue).flatMap({ $0 }) { ret.append(contentsOf: options) }
+        ret.append(repository)
+        if let directory = directory { ret.append(directory) }
         
-        public static func exec_path(_ path: String?) -> Self { GitOption(rawValue: "--exec-path\(path == nil ? "" : ("=" + path!.appleScriptPath))") }
-        public static func htmp_path(_ path: String) -> Self { GitOption(rawValue: "--html-path \(path.appleScriptPath)") }
-        public static func man_path(_ path: String) -> Self { GitOption(rawValue: "--man-path \(path.appleScriptPath)") }
-        public static func info_path(_ path: String) -> Self { GitOption(rawValue: "--info-path \(path.appleScriptPath)") }
-        public static let paginate = GitOption(rawValue: "--paginate")
-        public static let no_pager = GitOption(rawValue: "--no-pager")
-        public static func git_dir(_ path: String) -> Self { GitOption(rawValue: "--git-dir=\(path.appleScriptPath)") }
-        public static func work_tree(_ path: String) -> Self { GitOption(rawValue: "--work-tree=\(path.appleScriptPath)") }
-        public static func namespace(_ path: String) -> Self { GitOption(rawValue: "--namespace=\(path.appleScriptPath)") }
-        public static func super_prefix(_ path: String) -> Self { GitOption(rawValue: "--super-prefix=\(path.appleScriptPath)") }
-        public static let bare = GitOption(rawValue: "--bare")
-        public static let no_replace_objects = GitOption(rawValue: "--no-replace-objects")
-        public static let literal_pathspecs = GitOption(rawValue: "--literal-pathspecs")
-        public static let glob_pathspecs = GitOption(rawValue: "--glob-pathspecs")
-        public static let noglob_pathspecs = GitOption(rawValue: "--noglob-pathspecs")
-        public static let icase_pathspecs = GitOption(rawValue: "--icase-pathspecs")
-        public static let no_optional_locks = GitOption(rawValue: "--no-optional-locks")
-        public static func list_cmds(_ groups: [String]) -> Self { GitOption(rawValue:"--list-cmds=\(groups.joined(separator: ","))") }
+        return Self(rawValue: ret)
+    }
+    
+    /// `git clone`可选项
+    public struct CloneOption: Hashable {
+        public let rawValue: [String]
+        public init(rawValue: String...) { self.rawValue = rawValue }
         
+        // TODO: 待完善...
     }
 }
 
-extension Git.GitOption {
-    /// branch命令子可选项
-    public static func branch_option(_ option: BranchOption) -> Self {
-        Self(rawValue: option.rawValue)
+extension Git.GitCommand {
+    /// 列出、创建或删除分支
+    public static func branch(_ options: [BranchOption]) -> Self {
+        Self(rawValue: ["branch"] + options.map(\.rawValue))
     }
-    /// 分支子可选项
+    
+    /// `git branch`可选项
     public struct BranchOption: Hashable {
         public let rawValue: String
         public init(rawValue: String) { self.rawValue = rawValue }
@@ -199,11 +204,12 @@ extension Git.GitOption {
     }
 }
 
-extension Git.GitOption {
-    /// branch命令子可选项
-    public static func tag_option(_ option: TagOption) -> Self {
-        Self(rawValue: option.rawValue)
+extension Git.GitCommand {
+    /// 创建、列出、删除或校验一个 GPG 签名的标签对象
+    public static func tag(_ options: [TagOption]) -> Self {
+        Self(rawValue: ["tag"] + options.map(\.rawValue))
     }
+    
     /// 分支子可选项
     public struct TagOption: Hashable {
         public let rawValue: String
@@ -213,11 +219,12 @@ extension Git.GitOption {
     }
 }
 
-extension Git.GitOption {
-    /// log命令子选项
-    public static func log_option(_ option: LogOption) -> Self {
-        Self(rawValue: option.rawValue)
+extension Git.GitCommand {
+    /// 显示提交日志
+    public static func log(_ options: [LogOption]) -> Self {
+        Self(rawValue: ["log"] + options.map(\.rawValue))
     }
+    
     /// log子选项
     public struct LogOption: Hashable {
         public let rawValue: String
@@ -253,7 +260,7 @@ extension Git.GitOption {
     }
 }
 
-extension Git.GitOption.LogOption {
+extension Git.GitCommand.LogOption {
     public struct Pretty: Hashable {
         public let rawValue: String
         public init(rawValue: String) { self.rawValue = rawValue }
@@ -309,7 +316,7 @@ extension Git.GitOption.LogOption {
     }
 }
 
-extension Git.GitOption.LogOption.Pretty {
+extension Git.GitCommand.LogOption.Pretty {
     /// 格式化值
     public struct Format: Hashable {
         public let rawValue: String
@@ -369,11 +376,12 @@ extension Git.GitOption.LogOption.Pretty {
     }
 }
 
-extension Git.GitOption {
-    /// status命令子选项
-    public static func status_option(_ option: StatusOption) -> Self {
-        Self(rawValue: option.rawValue)
+extension Git.GitCommand {
+    /// 显示工作区状态
+    public static func status(_ options: [StatusOption]? = nil) -> Self {
+        Self(rawValue: ["status"] + (options?.compactMap({ $0.rawValue }) ?? []))
     }
+    
     /// status子选项
     public struct StatusOption: Hashable {
         public let rawValue: String
@@ -386,62 +394,51 @@ extension Git.GitOption {
         public static let verbose = StatusOption(rawValue: "--verbose")
         public static func untracked_files(_ mode: UntrackedMode = .normal) -> Self { StatusOption(rawValue: "--untracked-files=\(mode.rawValue)") }
         public static func ignored_files(_ mode: IgnoredMode = .traditional) -> Self { StatusOption(rawValue: "--ignored=\(mode.rawValue)")}
+        
+        public enum UntrackedMode: String {
+            case no, normal, all
+        }
+        
+        public enum IgnoredMode: String {
+            case traditional, no, matching
+        }
     }
 }
 
-extension Git.GitOption.StatusOption {
-    public struct UntrackedMode: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        
-        public static let no = UntrackedMode(rawValue: "no")
-        public static let normal = UntrackedMode(rawValue: "normal")
-        public static let all = UntrackedMode(rawValue: "all")
+extension Git.GitCommand {
+    /// 切换分支或恢复工作区文件
+    public static func checkout(_ options: [CheckoutOption]) -> Self {
+        Self(rawValue: ["checkout"] + options.map(\.rawValue).flatMap({ $0 }))
     }
-    
-    public struct IgnoredMode: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        
-        public static let traditional = IgnoredMode(rawValue: "traditional")
-        public static let no = IgnoredMode(rawValue: "no")
-        public static let matching = IgnoredMode(rawValue: "matching")
-    }
-}
-
-
-extension Git.GitOption {
-    /// checkout 命令子选项
-    public static func checkout_option(_ option: CheckoutOption) -> Self {
-        Self(rawValue: option.rawValue)
-    }
+             
     /// checkout子选项
     public struct CheckoutOption: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
+        public let rawValue: [String]
+        public init(rawValue: String...) { self.rawValue = rawValue }
         
         /// 静默输出
         public static let quiet = CheckoutOption(rawValue: "--quiet")
         /// 强制操作
         public static let force = CheckoutOption(rawValue: "--force")
         /// 创建并切换至新分支，如果分支已存在则失败
-        public static func new_branch(_ branch: String) -> Self { CheckoutOption(rawValue: "-b \(branch)") }
+        public static func new_branch(_ branch: String) -> Self { CheckoutOption(rawValue: "-b", branch) }
         /// 强制创建并切换至新分支，如果分支已存在则只切换至该分支
-        public static func new_branch_force(_ branch: String) -> Self { CheckoutOption(rawValue: "-B \(branch)") }
+        public static func new_branch_force(_ branch: String) -> Self { CheckoutOption(rawValue: "-B", branch) }
         /// 关联远程分支与 git branch --set-upstream-to=<branch> 功能一致
-        public static func track(_ remote_branch: String) -> Self { CheckoutOption(rawValue: "--track \(remote_branch)") }
+        public static func track(_ remote_branch: String) -> Self { CheckoutOption(rawValue: "--track", remote_branch) }
         /// 切换至分支
         public static func branch(_ name: String) -> Self { CheckoutOption(rawValue: name) }
         /// 重置修改
-        public static func reset(_ path: String) -> Self { CheckoutOption(rawValue: "-- \(path)") }
+        public static func reset(_ path: String) -> Self { CheckoutOption(rawValue: "--", path) }
     }
 }
 
-extension Git.GitOption {
-    /// reset命令子选项
-    public static func reset_option(_ option: ResetOption) -> Self {
-        Self(rawValue: option.rawValue)
+extension Git.GitCommand {
+    /// 重置当前 HEAD 到指定状态
+    public static func reset(_ options: [ResetOption]) -> Self {
+        Self(rawValue: ["reset"] + options.map(\.rawValue))
     }
+    
     /// reset子选项
     public struct ResetOption: Hashable {
         public let rawValue: String
@@ -459,7 +456,7 @@ extension Git.GitOption {
     }
 }
 
-extension Git.GitOption.ResetOption {
+extension Git.GitCommand.ResetOption {
     public struct Mode: Hashable {
         public let rawValue: String
         public init(rawValue: String) { self.rawValue = rawValue }
@@ -495,11 +492,12 @@ extension Git.GitOption.ResetOption {
     }
 }
 
-extension Git.GitOption {
-    /// add命令子选项
-    public static func add_option(_ option: AddOption) -> Self {
-        Self(rawValue: option.rawValue)
+extension Git.GitCommand {
+    /// 添加文件内容至索引
+    public static func add(_ options: AddOption...) -> Self {
+        Self(rawValue: ["add"] + options.map(\.rawValue))
     }
+    
     /// add子选项
     public struct AddOption: Hashable {
         public let rawValue: String
@@ -511,7 +509,7 @@ extension Git.GitOption {
     }
 }
 
-extension Git.GitOption.AddOption {
+extension Git.GitCommand.AddOption {
     public struct Pathspec: Hashable {
         public let rawValue: String
         public init(rawValue: String) { self.rawValue = rawValue }

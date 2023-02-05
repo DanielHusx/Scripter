@@ -25,6 +25,7 @@
 
 import Foundation
 
+/// `eval`重新运算求出参数的内容
 public struct Eval: Script {
     public var path: String?
     public var arguments: [String]?

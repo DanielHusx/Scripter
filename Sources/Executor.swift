@@ -30,90 +30,112 @@ import Combine
 extension Script {
     /// 脚本执行
     public func execute() -> ScriptResultAnyOption {
-        ScriptExecutor.execute(self)
+        ScriptExecutor.shared.execute(self)
     }
     
     /// 脚本中断
     public static func interrupt() {
-        ScriptExecutor.interrupt()
+        ScriptExecutor.shared.interrupt()
     }
     
     /// 输出流
-    public static func stream(_ type: ScriptType) -> AnyPublisher<ScriptResultAnyOption?, Never>? {
-        ScriptExecutor.stream(type)
+    public static func stream() -> AnyPublisher<ScriptResultAnyOption, Never>? {
+        ScriptExecutor.shared.stream.eraseToAnyPublisher()
     }
 }
 
+/*
+ 执行脚本类特点
+ - NSUserScriptTask: 忽略输入输出，无参数执行任意脚本路径文件
+ - NSUserUnixTask: unix程序一般是shell，可控制入参，输入输出及错误输出。沙盒情况下只读FileManager.SearchPathDirectory.applicationScriptsDirectory下且不可写
+ - NSUserAppleScriptTask: 同NSUserUnixTask的Apple脚本程序
+ - NSUserAutomatorTask: 同NSUserUnixTask的工作流脚本程序
+ */
 
-/// 脚本执行者
-final class ScriptExecutor {
+/// 脚本统一执行者
+struct ScriptExecutor {
     /// 单例对象
-    private static let shared = ScriptExecutor()
+    static let shared = ScriptExecutor()
+    /// 统一输出流（正常/错误管道）
+    var stream: PassthroughSubject<ScriptResultAnyOption, Never> = .init()
+    
+    /// 取消器
+    private var cancellable = Set<AnyCancellable>()
     /// 执行处理者
-    private var handler: ExecutorHandler
+    private var handler: ExecutorHandlerObject
     
     private init() {
-        let handler = Handler()
-        let apple = AppleExecutor()
+        let apple = AppleScriptExecutor()
         let process = ProcessExecutor()
-        let unknown = UnknownExecutor()
         
-        handler.next = apple
-        apple.next = process
-        process.next = unknown
+        apple.setNext(process)
         
-        self.handler = handler
+        self.handler = apple
+        // 订阅流
+        process.stream.subscribe(stream).store(in: &cancellable)
     }
 }
 
 extension ScriptExecutor {
-    /// 监听流
-    class func stream(_ type: ScriptType) -> AnyPublisher<ScriptResultAnyOption?, Never>? {
-        guard type.isProcess else { return nil }
-        
-        var executor: ExecutorHandler? = shared.handler
-        while let next = executor?.next {
-            guard let process = next as? ProcessExecutor else {
-                executor = executor?.next
-                continue
-            }
-            
-            return process.$stream.eraseToAnyPublisher()
-        }
-        
-        return nil
-    }
-    
     /// 执行脚本
-    class func execute(_ script: Script) -> ScriptResultAnyOption {
-        shared.handler.execute(script)
+    func execute(_ script: Script) -> ScriptResultAnyOption {
+        do {
+            let ret = try handler.execute(script)
+            return .success(ret)
+        } catch {
+            switch error {
+            case is ScriptError: return .failure(error as! ScriptError)
+            default: return .failure(.executeFailed(script: script.shell, reason: ""))
+            }
+        }
     }
     
     /// 中断脚本
-    class func interrupt() {
-        shared.handler.interrupt()
+    func interrupt() {
+        handler.interrupt()
     }
 }
 
+
+// MARK: - 执行者协议
+/// 执行者协议
 protocol ExecutorHandler: AnyObject {
-    /// 传递者
-    var next: ExecutorHandler? { get set }
+    associatedtype ExecutorResult
+    
+    /// 下一责任者
+    var next: (any ExecutorHandler)? { get set }
+    /// 设置下一责任者
+    @discardableResult
+    func setNext(_ handler: any ExecutorHandler) -> any ExecutorHandler
+    
     /// 执行脚本
-    func execute(_ script: Script) -> ScriptResultAnyOption
+    func execute(_ script: Script) throws -> ExecutorResult
     /// 中断执行
     func interrupt()
+    
 }
 
-class Handler: ExecutorHandler {
-    var next: ExecutorHandler?
+extension ExecutorHandler {
+    @discardableResult
+    func setNext(_ handler: any ExecutorHandler) -> any ExecutorHandler {
+        next = handler
+        return handler
+    }
     
-    func execute(_ script: Script) -> ScriptResultAnyOption {
-        // 传递
+}
+
+// MARK: - 基础类
+class ExecutorHandlerObject: ExecutorHandler {
+    typealias ExecutorResult = Any?
+    
+    var next: (any ExecutorHandler)?
+    
+    func execute(_ script: Script) throws -> ExecutorResult {
         guard let next = next else {
-            return .failure(.cannotHandleScript(scriptType: script.type))
+            throw ScriptError.cannotHandleScript(scriptType: script.type)
         }
         
-        return next.execute(script)
+        return try next.execute(script)
     }
     
     func interrupt() {
@@ -121,61 +143,76 @@ class Handler: ExecutorHandler {
     }
 }
 
-// MARK: - 苹果脚本
-class AppleExecutor: ExecutorHandler {
+
+// MARK: - AppleScript脚本
+class AppleScriptExecutor: ExecutorHandlerObject {
     /// 锁
     private let lock = NSLock()
     
-    /// 下一持有者
-    var next: ExecutorHandler?
-    
-    func execute(_ script: Script) -> ScriptResultAnyOption {
-        guard script.type.isApple else {
-            return next?.execute(script) ?? .failure(.cannotHandleScript(scriptType: script.type))
-        }
+    /// 执行脚本
+    override func execute(_ script: Script) throws -> ExecutorResult {
+        // 非AppleScript不执行
+        guard script.type.isApple else { return try super.execute(script) }
         
-        if let ret = script.appleCheck() { return ret }
+        return try execute(appleScript: script)
+    }
+}
+
+extension AppleScriptExecutor {
+    /// 内部执行
+    private func execute(appleScript script: Script) throws -> ExecutorResult {
+        try check(script)
         
         // 用锁因为一旦同一时间有两个命令正在执行NSAppleScript就有可能崩溃
         lock.lock()
-        let ret = execute(source: script.source)
+        let ret = try execute(source: script.appleScript)
         lock.unlock()
         
         return ret
     }
     
-    func interrupt() {
-        // 瞬发，无法中断
-        next?.interrupt()
+    /// 校验脚本有效性
+    private func check(_ script: Script) throws {
+        // 路径是否有值
+        guard let path = script.path, !path.isEmpty else {
+            throw ScriptError.scriptInvalid(reason: .pathEmpty)
+        }
     }
     
-    // MARK: private method
-    private func execute(source: String) -> ScriptResultAnyOption {
+    /// 执行Apple脚本
+    private func execute(source: String) throws -> ExecutorResult {
         let scriptor = NSAppleScript(source: source)
         var errorInfo: NSDictionary? = nil
         
         guard let result = scriptor?.executeAndReturnError(&errorInfo) else {
-            // 反馈错误
-            let errorMessage = errorInfo?.value(forKey: NSAppleScript.errorMessage) as? String
-            
-            // 这种情况属于没有输出、对于shell命令来说是正确的
-            // 但对于apple script就会抛出错误，所以此处做拦截
-            // 返回上层output、error都为空但是 return 为nil
-            guard errorMessage != "The command exited with a non-zero status." else {
-                return .success(nil)
-            }
-            
-            let errorCode = (errorInfo?.value(forKey: NSAppleScript.errorNumber) as? NSNumber)?.intValue
-            let reason = reason(code: errorCode,
-                                message: errorMessage)
-            
-            return .failure(.executeFailed(script: source, reason: reason))
+            return try errorResult(source, errorInfo: errorInfo)
         }
         
-        return .success(result.stringValue)
+        return result.stringValue
+    }
+}
+
+extension AppleScriptExecutor {
+    /// 错误结果处理
+    private func errorResult(_ source: String, errorInfo: NSDictionary?) throws -> ExecutorResult {
+        // 反馈错误
+        let errorMessage = errorInfo?.value(forKey: NSAppleScript.errorMessage) as? String
+        
+        // 这种情况属于没有输出、对于shell命令来说是正确的
+        // 但对于apple script就会抛出错误，所以此处做拦截
+        // 返回上层output、error都为空但是 return 为nil
+        guard errorMessage != "The command exited with a non-zero status." else {
+            return nil
+        }
+        
+        let errorCode = (errorInfo?.value(forKey: NSAppleScript.errorNumber) as? NSNumber)?.intValue
+        let reason = errorReason(code: errorCode, message: errorMessage)
+        
+        throw ScriptError.executeFailed(script: source, reason: reason)
     }
     
-    private func reason(code: Int?, message: String?) -> String {
+    /// 错误原因描述
+    private func errorReason(code: Int?, message: String?) -> String {
         let ret = message ?? ScriptLocalized.localized_unknownError
         guard let code = code else { return ret }
         
@@ -184,90 +221,135 @@ class AppleExecutor: ExecutorHandler {
     }
 }
 
-extension Script {
-    /// Apple脚本完整命令
-    public var source: String {
-        // eg: do shell script "sudo which git" with administrator privileges
-        let shellString = shell
-        let administrator = type.isAsAdministrator ? " with administrator privileges" : ""
-        return "do shell script \"\(shellString)\"\(administrator)"
-    }
-    
-    /// 检测脚本信息是否有效
-    fileprivate func appleCheck() -> ScriptResultAnyOption? {
-        // 路径是否有值
-        guard let path = path, !path.isEmpty else {
-            return .failure(.scriptInvalid(reason: .pathEmpty))
-        }
-        
-        return nil
-    }
-}
-
 
 // MARK: - Shell脚本
-class ProcessExecutor: ExecutorHandler, ObservableObject {
+class ProcessExecutor: ExecutorHandlerObject {
+    /// 流输出，当isIgnoreOutput为true时方可生效
+    var stream: PassthroughSubject<ScriptResultAnyOption, Never> = .init()
+    
     /// 执行的命令池
     private var processes: [Process] = []
     /// 锁
     private let lock = NSLock()
     
-    /// 下一持有者
-    var next: ExecutorHandler?
-    /// 流输出，当isIgnoreOutput为true时方可生效
-    @Published var stream: ScriptResultAnyOption?
-    
-    func execute(_ script: Script) -> ScriptResultAnyOption {
-        guard script.type.isProcess else {
-            return next?.execute(script) ?? .failure(.cannotHandleScript(scriptType: script.type))
-        }
+    override func execute(_ script: Script) throws -> ExecutorResult {
+        guard script.type.isProcess else { return try super.execute(script) }
         
-        // 校验脚本有效性
-        if let ret = script.processCheck() { return ret }
-        
-        return execute(process: process(script: script))
+        return try execute(script: script)
     }
     
-    /// 中断所有脚本
-    func interrupt() {
-        for process in processes { interrupt(process: process) }
-        next?.interrupt()
+    override func interrupt() {
+        // 没有恢复机制，就先直接终止
+        for process in processes { terminate(process) }
+        
+        super.interrupt()
     }
 }
 
-
-// MARK: private method
 extension ProcessExecutor {
-    /// 执行脚本
-    private func execute(process: Process) -> ScriptResultAnyOption {
+    /// 内部执行脚本
+    private func execute(script: Script) throws -> ExecutorResult {
+        try check(script)
+        
+        // 缓存起来
+        let process = process(script: script)
         append(process)
         
+        return try execute(process: process)
+    }
+    
+    /// 校验脚本有效性
+    private func check(_ script: Script) throws {
+        // 路径是否有值
+        guard let path = script.path, !path.isEmpty else {
+            throw ScriptError.scriptInvalid(reason: .pathEmpty)
+        }
+        
+        // 校验脚本文件是否存在且是否是非文档路径
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            throw ScriptError.scriptInvalid(reason: .pathNotExistOrIsDirectory(path: path))
+        }
+        
+        // 判断脚本是否有执行权限
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            throw ScriptError.scriptInvalid(reason: .pathPermissionDenied(path: path))
+        }
+    }
+    
+    /// 执行脚本
+    private func execute(process: Process) throws -> ExecutorResult {
         // 执行脚本
-        process.launch()
+        if #available(macOS 13.0, *) {
+            try process.run()
+        } else {
+            process.launch()
+        }
         // 等待执行完毕
         process.waitUntilExit()
         
         // 执行结果解析
-        return result(process: process)
+        return try result(process: process)
     }
     
-    /// 组装脚本运行对象
-    private func process(script: Script) -> Process {
-        let ignoreOutput = script.type.isIgnoreOutput
+    /// 终止
+    private func terminate(_ process: Process?) {
+        guard process?.isRunning ?? false else { return }
         
+        process?.terminate()
+    }
+    
+    /// 中断
+    private func interrupt(_ process: Process?) {
+        guard process?.isRunning ?? false else { return }
+        
+        process?.interrupt()
+    }
+}
+
+extension ProcessExecutor {
+    /// 解析结果
+    private func result(process: Process) throws -> ExecutorResult {
+        // 判断是否是非正常结束，算执行失败
+        guard process.sc_isSuccess else { return try errorResult(process) }
+        
+        // 正常结束下，理论上不会有错误打印，即便有也忽略它
+        return process.sc_outputStream
+    }
+    
+    /// 错误结果处理
+    private func errorResult(_ process: Process) throws {
+        let reason = errorReason(code: process.terminationStatus,
+                                 reason: process.terminationReason,
+                                 outputs: process.sc_errorStream)
+        let script = process.shell
+        
+        throw ScriptError.executeFailed(script: script, reason: reason)
+    }
+    
+    /// 错误原因
+    private func errorReason(code: Int32, reason: Process.TerminationReason, outputs: String?) -> String {
+        let ret = outputs ?? ScriptLocalized.localized_unknownError
+        return ret + " [code: \(code)] [reason: \(reason.sc_reason)]"
+    }
+}
+
+extension ProcessExecutor {
+    /// `Script -> Process`
+    private func process(script: Script) -> Process {
         let process = Process()
         
         process.executableURL = URL(fileURLWithPath: script.path!)
         process.arguments = script.arguments ?? []
         // 未设置环境时不能设置env，不然其内部无法继承内部的env，从而可能导致xcodebuild archive异常
-        if let env = script.type.environment { process.environment = env }
+        if let env = script.type.environment, !env.isEmpty { process.environment = env }
         
-        process.sc_ignoreOutput = ignoreOutput
+        process.sc_ignoreOutput = script.type.isIgnoreOutput
         
         // terminationHandler并不一定在waitUtilExit()之后回调
         process.terminationHandler = { [weak self] p in
             // 结束时清除输入输出，不然会导致CPU暴增
-            self?.cleanStream(process: p)
+            self?.clean(stream: p)
             self?.remove(p)
         }
         
@@ -280,23 +362,22 @@ extension ProcessExecutor {
             inPipe.fileHandleForWriting.writeabilityHandler = { handler in
                 try? handler.write(contentsOf: contents)
             }
-
+            
             process.standardInput = inPipe
         }
         
         // 正常输出管道
         let outPipe = Pipe()
         outPipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handler in
-            guard let s = String(data: handler.availableData, encoding: String.Encoding.utf8),
+            guard let s = String(data: handler.availableData, encoding: .utf8),
                   !s.isEmpty else { return }
             
-            self?.stream = .success(s)
+            self?.stream.send(.success(s))
             
             // 不忽略则加入到缓存中
-            guard !ignoreOutput else { return }
+            guard !(process?.sc_ignoreOutput ?? true) else { return }
             
-            if process?.sc_outputStream == nil { process?.sc_outputStream = "" }
-            process?.sc_outputStream?.append(s.trimmingCharacters(in: .whitespacesAndNewlines))
+            process?.sc_outputStream.append(s.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         
         process.standardOutput = outPipe
@@ -304,16 +385,15 @@ extension ProcessExecutor {
         // 错误输出管道
         let errPipe = Pipe()
         errPipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handler in
-            guard let s = String(data: handler.availableData, encoding: String.Encoding.utf8),
+            guard let s = String(data: handler.availableData, encoding: .utf8),
                   !s.isEmpty else { return }
             
-            self?.stream = .failure(.executeFailed(script: process?.shell ?? "", reason: s))
+            self?.stream.send(.failure(.executeFailed(script: process?.shell ?? "", reason: s)))
             
             // 不忽略则加入到缓存中
-            guard !ignoreOutput else { return }
+            guard !(process?.sc_ignoreOutput ?? true) else { return }
             
-            if process?.sc_errorStream == nil { process?.sc_errorStream = "" }
-            process?.sc_errorStream?.append(s.trimmingCharacters(in: .whitespacesAndNewlines))
+            process?.sc_errorStream.append(s.trimmingCharacters(in: .whitespacesAndNewlines))
             
         }
         
@@ -322,39 +402,8 @@ extension ProcessExecutor {
         return process
     }
     
-    /// 解析结果
-    private func result(process: Process) -> ScriptResultAnyOption {
-        // 判断是否是非正常结束，算执行失败
-        guard process.sc_isSuccess else {
-            let terminationStatus = process.terminationStatus
-            let outputs = process.sc_errorStream
-            let terminationReason = process.terminationReason
-            
-            let reason = reason(code: terminationStatus, reason: terminationReason, outputs: outputs)
-            let script = process.shell
-            
-            return .failure(.executeFailed(script: script, reason: reason))
-        }
-        
-        // 正常结束下的输出与错误打印，理论上不会有错误打印，即便有也忽略它
-        let output: String? = process.sc_outputStream
-        return .success(output)
-    }
-    
-    private func reason(code: Int32, reason: Process.TerminationReason, outputs: String?) -> String {
-        let ret = outputs ?? ScriptLocalized.localized_unknownError
-        return ret + " [code: \(code)] [reason: \(reason.sc_reason)]"
-    }
-    
-    /// 中断
-    private func interrupt(process: Process?) {
-        guard process?.isRunning ?? false else { return }
-        
-        process?.interrupt()
-    }
-    
-    /// 清理流
-    private func cleanStream(process: Process?) {
+    /// 清理流及其关联，并关闭
+    private func clean(stream process: Process?) {
         if let pipe = process?.standardOutput as? Pipe {
             try? pipe.fileHandleForReading.close()
             pipe.fileHandleForReading.readabilityHandler = nil
@@ -370,7 +419,9 @@ extension ProcessExecutor {
             pipe.fileHandleForWriting.writeabilityHandler = nil
         }
     }
-    
+}
+
+extension ProcessExecutor {
     /// 添加缓存
     private func append(_ process: Process) {
         lock.lock()
@@ -410,25 +461,26 @@ extension Process {
         set { objc_setAssociatedObject(self, &AssociateKeys.sc_ignoreOutput, newValue, .OBJC_ASSOCIATION_ASSIGN) }
     }
     /// 输出流
-    internal var sc_outputStream: String? {
+    internal var sc_outputStream: String {
         get {
             guard let ret = objc_getAssociatedObject(self, &AssociateKeys.sc_outputStream) as? String else {
-                return nil
+                return ""
             }
             return ret
         }
         set { objc_setAssociatedObject(self, &AssociateKeys.sc_outputStream, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
     /// 错误流
-    internal var sc_errorStream: String? {
+    internal var sc_errorStream: String {
         get {
             guard let ret = objc_getAssociatedObject(self, &AssociateKeys.sc_errorStream) as? String else {
-                return nil
+                return ""
             }
             return ret
         }
         set { objc_setAssociatedObject(self, &AssociateKeys.sc_errorStream, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
+    
     /// Shell完整命令
     internal var shell: String {
         let pathString = executableURL?.absoluteString ?? ""
@@ -436,41 +488,4 @@ extension Process {
         
         return pathString + " " + argumentsString
     }
-}
-
-
-// MARK: Script Extension
-extension Script {
-    /// 检测脚本信息是否有效
-    func processCheck() -> ScriptResultAnyOption? {
-        // 路径是否有值
-        guard let path = path, !path.isEmpty else {
-            return .failure(.scriptInvalid(reason: .pathEmpty))
-        }
-        
-        // 校验脚本文件是否存在且是否是非文档路径
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            return .failure(.scriptInvalid(reason: .pathNotExistOrIsDirectory(path: path)))
-        }
-        
-        // 判断脚本是否有执行权限
-        guard FileManager.default.isExecutableFile(atPath: path) else {
-            return .failure(.scriptInvalid(reason: .pathPermissionDenied(path: path)))
-        }
-        
-        return nil
-    }
-}
-
-// MARK: - 未知脚本
-class UnknownExecutor: ExecutorHandler {
-    
-    weak var next: ExecutorHandler?
-    
-    func execute(_ script: Script) -> ScriptResultAnyOption {
-        return .failure(.cannotHandleScript(scriptType: script.type))
-    }
-    
-    func interrupt() {}
 }

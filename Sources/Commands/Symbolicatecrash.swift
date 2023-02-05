@@ -45,7 +45,7 @@ public struct Symbolicatecrash: Script {
     ///    - environment: 环境变量，默认为["DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"]
     /// - Returns: Script
     public init(isIgnoreOutput: Bool = false,
-                environment: [String: String]? = ScriptType.Environment.DEVELOPER_DIR) {
+                environment: [String: String]? = .DEVELOPER_DIR) {
         self.init(.symbolicatecrash, type: .process(isIgnoreOutput: isIgnoreOutput, environment: environment, input: nil))
     }
     

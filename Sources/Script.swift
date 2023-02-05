@@ -63,6 +63,14 @@ extension Script {
         return pathString + " " + argumentsString
     }
     
+    /// Apple脚本完整命令
+    public var appleScript: String {
+        // eg: do shell script "sudo which git" with administrator privileges
+        let ret = "do shell script \"\(shell)\""
+        guard type.isAsAdministrator else { return ret }
+        return "\(ret) with administrator privileges"
+    }
+    
     /// 复制一份新对象变更参数列表
     public func duplicate(_ arguments: [String]?) -> Self {
         .init(path: path, arguments: (arguments?.isEmpty ?? true) ? nil : arguments, type: type)

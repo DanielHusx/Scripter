@@ -52,6 +52,7 @@ public struct Whereis: Script {
         options: [WhereisOption]? = nil
     ) -> Self {
         var arguments = self.arguments ?? []
+        
         if let options = options { arguments.append(contentsOf: options.compactMap({ $0.rawValue })) }
         arguments.append(value)
         
