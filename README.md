@@ -25,13 +25,13 @@ dependencies: [
 import Scripter
 
 let version = Git().command(options: [.version])
-               		 .execute()
-               		 .string
+               	   .execute()
+               	   .string
 // version: git version 2.22.0
 
 let whichPath = Whereis().pureScriptPath(commandString)
-            						 .execute()
-            						 .string
+			 .execute()
+			 .string
 // whichPath: /usr/bin/which
 ```
 
@@ -86,8 +86,8 @@ public struct Echo: Script {
 
 // 3. 执行脚本
 let echo_print = Echo().command("123")
-											 .execute()
-											 .string
+		       .execute()
+		       .string
 // echo_print: 123
 ```
 
