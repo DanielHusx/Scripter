@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  ScriptError.swift
 //
 //  Copyright (c) 2023 Daniel
 //

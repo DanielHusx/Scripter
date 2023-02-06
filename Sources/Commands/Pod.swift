@@ -53,13 +53,11 @@ public struct Pod: Script {
     /// - Returns: Script
     public func command(
         commands: [PodCommand],
-        options: [PodOptions]? = nil,
         reserve: [String]? = nil
     ) -> Self {
         var arguments = self.arguments ?? []
         
-        arguments.append(contentsOf: commands.map { $0.rawValue })
-        if let options = options { arguments.append(contentsOf: options.map { $0.rawValue }) }
+        arguments.append(contentsOf: commands.map { $0.rawValue.strings(type) }.flatMap({ $0 }))
         if let reserve = reserve { arguments.append(contentsOf: reserve) }
         
         return duplicate(arguments)
@@ -68,34 +66,48 @@ public struct Pod: Script {
 
 extension Pod {
     /// pod指令
-    public struct PodCommand: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
+    public struct PodCommand {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: AnyParameterLiteral...) { self.rawValue = rawValue }
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        private static func command<T>(
+            _ cmd: String,
+            options: [T]? = nil,
+            reserve: [String]? = nil
+        ) -> Self where T: PodOptionProtocol {
+            var ret: [AnyParameterLiteral] = [cmd]
+            
+            if let options = options, !options.isEmpty { ret.append(contentsOf: options.compactMap({ $0.rawValue }).flatMap({ $0 })) }
+            if let reserve = reserve, !reserve.isEmpty { ret.append(contentsOf: reserve) }
+            
+            return Self(rawValue: ret)
+        }
+        
+        private static func command<T>(
+            _ cmd: String,
+            options: [T]? = nil,
+            reserve: String?
+        ) -> Self where T: PodOptionProtocol {
+            guard let reserve = reserve else { return command(cmd, options: options) }
+            return command(cmd, options: options, reserve: [reserve])
+        }
         
         /// 当前文档路径下创建Podfile
-        public static let initial = PodCommand(rawValue: "init")
-        /// 通过Podfile.lock的版本信息安装项目依赖
-        public static let install = PodCommand(rawValue: "install")
-        /// 更新已过期的项目依赖并创建新的Podfile.lock
-        public static let update = PodCommand(rawValue: "update")
-        /// 展示已过期的项目依赖
-        public static let outdated = PodCommand(rawValue: "outdated")
+        public static func initial(_ xcodeproj: String?, options: [PodOption]? = nil) -> Self {
+            command("init", options: options, reserve: xcodeproj)
+        }
+        /// 显示cocoapods环境配置
+        public static func environment(_ options: [PodOption]? = nil) -> Self { command("env", options: options) }
+        
         /// 展示可用的cocoapods配置
         public static let plugins = PodCommand(rawValue: "plugins")
-        /// 搜索pods
-        public static let search = PodCommand(rawValue: "search")
         /// 设置cocoapods环境
         public static let setup = PodCommand(rawValue: "setup")
-        /// 显示cocoapods环境配置
-        public static let environment = PodCommand(rawValue: "env")
         /// 管理pod仓库
         public static let spec = PodCommand(rawValue: "spec")
-        /// 显示pods列表
-        public static let list = PodCommand(rawValue: "list")
         /// 开发pods
         public static let lib = PodCommand(rawValue: "lib")
-        /// 从项目中分解cocoapods
-        public static let deintegrate = PodCommand(rawValue: "deintegrate")
         /// 操作cocoapods缓存
         public static let cache = PodCommand(rawValue: "cache")
         /// 尝试pod项目依赖
@@ -104,9 +116,9 @@ extension Pod {
     
     /// pod选项
     /// - attention: 针对不同command可选项不一样、参照具体命令
-    public struct PodOptions: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
+    public struct PodOptions {
+        public let rawValue: AnyParameterLiteral
+        public init(rawValue: AnyParameterLiteral) { self.rawValue = rawValue }
         
         /// 不显示输出
         public static let silent = PodOptions(rawValue: "--silent")
@@ -119,9 +131,176 @@ extension Pod {
         
         /// 项目文档路径
         public static func projectDirectory(_ directory: String) -> Self {
-            PodOptions(rawValue: "--project-directory='\(directory)'")
+            PodOptions(rawValue: PathLiteral.part(part: "--project-directory=", path: directory))
         }
         
     }
        
+}
+
+public protocol PodOptionProtocol: ParameterOption {}
+
+extension PodOptionProtocol {
+    /// 允许`sudo pod`
+    public static var allow_root: Self { Self(rawValue: "--allow-root") }
+    /// 静默输出
+    public static var silent: Self { Self(rawValue: "--silent") }
+    /// 工具版本
+    public static var version: Self { Self(rawValue: "--version") }
+    /// 详细输出
+    public static var verbose: Self { Self(rawValue: "--verbose") }
+    /// 屏蔽`ANSI codes`输出
+    public static var no_ansi: Self { Self(rawValue: "--no-ansi") }
+    /// 帮助信息
+    public static var help: Self { Self(rawValue: "--help") }
+}
+
+extension Pod.PodCommand {
+    public struct PodOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+    }
+}
+
+// MARK: - `pod install`
+extension Pod.PodCommand {
+    /// 通过Podfile.lock的版本信息安装项目依赖
+    public static func install(_ options: [InstallOption]? = nil) -> Self {
+        command("install", options: options)
+    }
+    
+    public struct InstallOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// 更新仓库
+        public static let repo_update = Self(rawValue: "--repo-update")
+        /// 忽略项目缓存，专注pod安装（只限于项目允许增量安装的情况下使用）
+        public static let clean_install = Self(rawValue: "--clean-install")
+        /// 安装时禁止`Podfile, Podfile.lock`变更
+        public static let deployment = Self(rawValue: "--deployment")
+        /// 项目文档路径
+        public static func project_directory(_ directory: String) -> Self {
+            Self(rawValue: PathLiteral.part(part: "--project-directory=", path: directory))
+        }
+    }
+}
+
+// MARK: - `pod update`
+extension Pod.PodCommand {
+    /// 更新已过期的项目依赖并创建新的Podfile.lock
+    public static func update(_ podNames: [String]? = nil, options: [UpdateOption]? = nil) -> Self {
+        command("update", options: options, reserve: podNames)
+    }
+    
+    public struct UpdateOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// 资源设置
+        public static func source(_ value: String) -> Self { Self(rawValue: "--sources=\(value)") }
+        /// 不包含某个Pod
+        public static func exclude_pods(_ podName: String) -> Self { Self(rawValue: "--exclude-pods=\(podName)") }
+        /// 忽略项目缓存，专注pod安装（只限于项目允许增量安装的情况下使用）
+        public static let clean_install = Self(rawValue: "--clean-install")
+        /// 不更新仓库
+        public static let no_repo_update = Self(rawValue: "--no-repo-update")
+        /// 项目文档路径
+        public static func project_directory(_ directory: String) -> Self {
+            Self(rawValue: PathLiteral.part(part: "--project-directory=", path: directory))
+        }
+    }
+}
+
+// MARK: - `pod outdated`
+extension Pod.PodCommand {
+    /// 展示已过期的项目依赖
+    public static func outdated(_ options: [OutdatedOption]? = nil) -> Self {
+        command("outdated", options: options)
+    }
+    
+    public struct OutdatedOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// 忽略预发布
+        public static let ignore_prerelease = Self(rawValue: "--ignore-prerelease")
+        /// 不更新仓库
+        public static let no_repo_update = Self(rawValue: "--no-repo-update")
+        /// 项目文档路径
+        public static func project_directory(_ directory: String) -> Self {
+            Self(rawValue: PathLiteral.part(part: "--project-directory=", path: directory))
+        }
+        
+    }
+}
+
+// MARK: `pod deintegrate`
+extension Pod.PodCommand {
+    /// 从项目中分解cocoapods
+    public static func deintegrate(_ options: [DeintegrateOption]? = nil) -> Self {
+        command("deintegrate", options: options)
+    }
+    
+    public struct DeintegrateOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// 指定.xcodeproj文件
+        public static func xcodeproj(_ path: String) -> Self { Self(rawValue: [PathLiteral.path(path)]) }
+        /// 项目文档路径
+        public static func project_directory(_ directory: String) -> Self {
+            Self(rawValue: PathLiteral.part(part: "--project-directory=", path: directory))
+        }
+    }
+}
+
+// MARK: `pod search`
+extension Pod.PodCommand {
+    /// 搜索pods
+    public static func search(_ query: String, options: [SearchOption]? = nil) -> Self {
+        command("search", options: options, reserve: [query])
+    }
+    
+    public struct SearchOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// 解析`query`为正则
+        public static let regex = Self(rawValue: "--regex")
+        /// 只搜索名称
+        public static let simple = Self(rawValue: "--simple")
+        /// 显示其他统计信息（如 GitHub 观察者和分叉）
+        public static let stats = Self(rawValue: "--stats")
+        /// 从`cocoapods.org`搜索
+        public static let web = Self(rawValue: "--web")
+        /// 将搜索限制为支持iOS的 Pod
+        public static let ios = Self(rawValue: "--ios")
+        /// 将搜索限制为支持osx的 Pod
+        public static let osx = Self(rawValue: "--osx")
+        /// 将搜索限制为支持watchos的 Pod
+        public static let watchos = Self(rawValue: "--watchos")
+        /// 将搜索限制为支持tvos的 Pod
+        public static let tvos = Self(rawValue: "--tvos")
+        /// 不以页展示搜索结果
+        public static let no_pager = Self(rawValue: "--no-pager")
+    }
+}
+
+// MARK: `pod search`
+extension Pod.PodCommand {
+    /// 展示所有可用的pod
+    public static func list(_ options: [ListOption]? = nil) -> Self {
+        command("list", options: options)
+    }
+    
+    public struct ListOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        public static let update = Self(rawValue: "--update")
+        /// 显示其他统计信息（如 GitHub 观察者和分叉）
+        public static let stats = Self(rawValue: "--stats")
+        
+    }
 }

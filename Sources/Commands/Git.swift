@@ -59,41 +59,45 @@ public struct Git: Script {
     ) -> Self {
         var arguments = self.arguments ?? []
         
-        if let options = options { arguments.append(contentsOf: options.map(\.rawValue).flatMap({ $0 })) }
-        if let commands = commands { arguments.append(contentsOf: commands.map(\.rawValue).flatMap({ $0 })) }
+        if let options = options { arguments.append(contentsOf: options.compactMap({ $0.rawValue.strings(type) }).flatMap({ $0 })) }
+        if let commands = commands { arguments.append(contentsOf: commands.compactMap({ $0.rawValue.strings(type) }).flatMap({ $0 })) }
         if let reserve = reserve { arguments.append(contentsOf: reserve) }
-            
+        
         return duplicate(arguments)
     }
 }
 
 extension Git {
     /// git选项
-    public struct GitOption: Hashable {
-        public let rawValue: [String]
-        public init(rawValue: String...) { self.rawValue = rawValue }
+    public struct GitOption {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: AnyParameterLiteral...) { self.rawValue = rawValue }
         
         /// 指定git在目标文档路径下运行git命令。 当给出多个 -C 选项时，每个后续的非绝对 -C <path> 都相对于前面的 -C <path> 进行解释。
         /// 此选项会影响期望路径名的选项，例如 --git-dir 和 --work-tree，因为它们对路径名的解释将相对于由 -C 选项引起的工作目录进行。 例如，以下调用是等效的：
         /// `git --git-dir=a.git --work-tree=b -C c status`
         /// `git --git-dir=c/a.git --work-tree=c/b status`
-        public static func gitDirectory(_ directory: String) -> Self { GitOption(rawValue: "-C", directory) }
+        public static func gitDirectory(_ directory: String) -> Self { GitOption(rawValue: "-C", PathLiteral.path(directory)) }
         /// git版本
         public static let version = GitOption(rawValue: "--version")
         /// 将配置参数传递给命令。 给定的值将覆盖配置文件中的值。 <name> 应该与 git config 列出的格式相同（子键用点分隔）。 请注意，允许在 git -c foo.bar ... 中省略 = 并将 foo.bar 设置为布尔真值（就像 [foo]bar 在配置文件中所做的那样）。 包括等于但具有空值（如 git -c foo.bar= ...）将 foo.bar 设置为 git config --type=bool 将转换为 false 的空字符串。
         public static func configuration(_ name: String, _ value: String) -> Self { GitOption(rawValue: "-c", "\(name)=\(value)") }
         
-        public static func exec_path(_ path: String?) -> Self { GitOption(rawValue: "--exec-path\(path == nil ? "" : ("=" + path!))") }
-        public static func htmp_path(_ path: String) -> Self { GitOption(rawValue: "--html-path", path) }
-        public static func man_path(_ path: String) -> Self { GitOption(rawValue: "--man-path", path) }
-        public static func info_path(_ path: String) -> Self { GitOption(rawValue: "--info-path", path) }
+        public static func exec_path(_ path: String? = nil) -> Self {
+            let cmd = "--exec-path"
+            guard let path = path else { return Self(rawValue: cmd) }
+            return Self(rawValue: PathLiteral.part(part: "\(cmd)=", path: path))
+        }
+        public static func htmp_path(_ path: String) -> Self { GitOption(rawValue: "--html-path", PathLiteral.path(path)) }
+        public static func man_path(_ path: String) -> Self { GitOption(rawValue: "--man-path", PathLiteral.path(path)) }
+        public static func info_path(_ path: String) -> Self { GitOption(rawValue: "--info-path", PathLiteral.path(path)) }
         public static let paginate = GitOption(rawValue: "--paginate")
         public static let no_pager = GitOption(rawValue: "--no-pager")
         /// `git --git-dir=/path/to/directory/.git`与`git -C /path/to/directory` 等价
-        public static func git_dir(_ path: String) -> Self { GitOption(rawValue: "--git-dir=\(path)") }
-        public static func work_tree(_ path: String) -> Self { GitOption(rawValue: "--work-tree=\(path)") }
-        public static func namespace(_ path: String) -> Self { GitOption(rawValue: "--namespace=\(path)") }
-        public static func super_prefix(_ path: String) -> Self { GitOption(rawValue: "--super-prefix=\(path)") }
+        public static func git_dir(_ path: String) -> Self { GitOption(rawValue: PathLiteral.part(part: "--git-dir=", path: path)) }
+        public static func work_tree(_ path: String) -> Self { GitOption(rawValue: PathLiteral.part(part: "--work-tree=", path: path)) }
+        public static func namespace(_ path: String) -> Self { GitOption(rawValue: PathLiteral.part(part: "--namespace=", path: path)) }
+        public static func super_prefix(_ path: String) -> Self { GitOption(rawValue: PathLiteral.part(part: "--super-prefix=", path: path)) }
         public static let bare = GitOption(rawValue: "--bare")
         public static let no_replace_objects = GitOption(rawValue: "--no-replace-objects")
         public static let literal_pathspecs = GitOption(rawValue: "--literal-pathspecs")
@@ -106,10 +110,10 @@ extension Git {
     }
     
     /// git命令类型
-    public struct GitCommand: Hashable {
-        public let rawValue: [String]
-        public init(rawValue: [String]) { self.rawValue = rawValue }
-        public init(rawValue: String...) { self.rawValue = rawValue }
+    public struct GitCommand {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        public init(rawValue: AnyParameterLiteral...) { self.rawValue = rawValue }
         
         /// 创建一个空的 Git 仓库或重新初始化一个已存在的仓库
         public static let initial = GitCommand(rawValue: "init")
@@ -155,11 +159,11 @@ extension Git {
 extension Git.GitCommand {
     /// 克隆仓库到一个新的目录
     public static func clone(_ repository: String, options: [CloneOption]? = nil, directory: String? = nil) -> Self {
-        var ret = ["clone"]
+        var ret: [AnyParameterLiteral] = ["clone"]
         
         if let options = options?.map(\.rawValue).flatMap({ $0 }) { ret.append(contentsOf: options) }
         ret.append(repository)
-        if let directory = directory { ret.append(directory) }
+        if let directory = directory { ret.append(PathLiteral.path(directory)) }
         
         return Self(rawValue: ret)
     }
@@ -412,9 +416,9 @@ extension Git.GitCommand {
     }
              
     /// checkout子选项
-    public struct CheckoutOption: Hashable {
-        public let rawValue: [String]
-        public init(rawValue: String...) { self.rawValue = rawValue }
+    public struct CheckoutOption {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: AnyParameterLiteral...) { self.rawValue = rawValue }
         
         /// 静默输出
         public static let quiet = CheckoutOption(rawValue: "--quiet")
@@ -429,30 +433,30 @@ extension Git.GitCommand {
         /// 切换至分支
         public static func branch(_ name: String) -> Self { CheckoutOption(rawValue: name) }
         /// 重置修改
-        public static func reset(_ path: String) -> Self { CheckoutOption(rawValue: "--", path) }
+        public static func reset(_ path: String) -> Self { CheckoutOption(rawValue: "--", PathLiteral.path(path)) }
     }
 }
 
 extension Git.GitCommand {
     /// 重置当前 HEAD 到指定状态
     public static func reset(_ options: [ResetOption]) -> Self {
-        Self(rawValue: ["reset"] + options.map(\.rawValue))
+        Self(rawValue: ["reset"] + options.map(\.rawValue).flatMap({ $0 }))
     }
     
     /// reset子选项
     public struct ResetOption: Hashable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
+        public let rawValue: [String]
+        public init(rawValue: String...) { self.rawValue = rawValue }
         /// 这种形式将当前分支头重置为 <commit> 并可能更新索引（将其重置为 <commit> 的树）和取决于 <mode> 的工作树。 如果省略 <mode>，则默认为 --mixed。
-        public static func reset_commit(_ mode: Mode, commit: Commit) -> Self { ResetOption(rawValue: "\(mode.rawValue) \(commit.rawValue)") }
+        public static func reset_commit(_ mode: Mode, commit: Commit) -> Self { ResetOption(rawValue: mode.rawValue, commit.rawValue) }
         /// 只输出错误
         public static let quiet = ResetOption(rawValue: "--quiet")
         /// 此表单将所有 <paths> 的索引条目重置为它们在 <tree-ish> 处的状态。 （它不会影响工作树或当前分支。）
         /// 这意味着 git reset <paths> 与 git add <paths> 相反。 运行 git reset <paths> 更新索引条目后，您可以使用 git-checkout(1) 将索引中的内容检查到工作树中。 或者，使用 git-checkout(1) 并指定提交，您可以一次性将提交中路径的内容复制到索引和工作树。
-        public static func reset_paths(_ paths: [String]) -> Self { ResetOption(rawValue: "-- \(paths.joined(separator: " "))") }
+        public static func reset_paths(_ paths: [String]) -> Self { ResetOption(rawValue: "--", paths.joined(separator: " ")) }
         /// 以交互方式选择索引和 <tree-ish> 之间的差异（默认为 HEAD）。 所选的块被反向应用到索引。
         /// 这意味着 git reset -p 与 git add -p 相反，即您可以使用它来有选择地重置大块头。 请参阅 git-add(1) 的“交互模式”部分以了解如何操作 --patch 模式。
-        public static func reset_patch_paths(_ paths: [String]) -> Self { ResetOption(rawValue: "--patch \(paths.joined(separator: " "))") }
+        public static func reset_patch_paths(_ paths: [String]) -> Self { ResetOption(rawValue: "--patch", paths.joined(separator: " ")) }
     }
 }
 

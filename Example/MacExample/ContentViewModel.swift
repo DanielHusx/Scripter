@@ -26,7 +26,7 @@ import Foundation
 import Scripter
 
 class ContentViewModel: ObservableObject {
-    private let git_dir = "/Users/daniel/Documents/iProjects/iGithub/Scripter/.git"
+    private let git_dir = "/Users/iosteam/Desktop/Scripter/.git"//"/Users/daniel/Documents/iProjects/iGithub/Scripter/.git"
     func echo_print() {
         let ret = Echo().command("123")
                         .execute()
@@ -35,12 +35,14 @@ class ContentViewModel: ObservableObject {
     }
     
     func git_currentBranch(_ type: ScriptType) {
-        let s = CFAbsoluteTimeGetCurrent()
-        let ret = Git(type).command(options: [.git_dir(git_dir.appleScriptPath)],
-                                    commands: [.branch([.show_current])])
-                            .execute()
-        let e = CFAbsoluteTimeGetCurrent()
-        print("\(e - s)s - \(ret)")
+        Task {
+            let s = CFAbsoluteTimeGetCurrent()
+            let ret = Git(type).command(options: [.git_dir(git_dir)],
+                                        commands: [.branch([.show_current])])
+                .execute()
+            let e = CFAbsoluteTimeGetCurrent()
+            print("\(e - s)s - \(ret)")
+        }
     }
     
     func git_currentBranchByProcess() {
