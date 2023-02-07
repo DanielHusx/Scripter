@@ -26,10 +26,21 @@
 import Foundation
 
 extension String {
-    /// 用于AppleScript脚本的地址参数
-    /// 
-    /// - attention: 当执行Process脚本时尽量别使用此方法，可能会导致反馈找不到该路径
-    public var appleScriptPath: String {
-        "'" + self + "'"
+    /// 引用标识
+    public enum Quote: String {
+        /// 单引号，
+        /// - attention: 在`Process`脚本中尽量别使用此引号，可能会导致反馈找不到该路径
+        case single = "'"
+        /// 双引号
+        /// - attention: 在`AppleScript`下使用可能会引起脚本识别错误
+        case double = "\""
+        /// 转译双引号
+        /// - attention: 一般只用于`AppleScript`必须用双引号的情况下
+        case backslashDouble = "\\\""
+    }
+    
+    /// `'xxx', "xxx", \"xxx\"...`
+    public func quote(_ qt: Quote) -> String {
+        qt.rawValue + self + qt.rawValue
     }
 }

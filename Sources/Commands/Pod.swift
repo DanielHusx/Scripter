@@ -104,14 +104,10 @@ extension Pod {
         public static let plugins = PodCommand(rawValue: "plugins")
         /// 设置cocoapods环境
         public static let setup = PodCommand(rawValue: "setup")
-        /// 管理pod仓库
-        public static let spec = PodCommand(rawValue: "spec")
         /// 开发pods
         public static let lib = PodCommand(rawValue: "lib")
         /// 操作cocoapods缓存
         public static let cache = PodCommand(rawValue: "cache")
-        /// 尝试pod项目依赖
-        public static let `try` = PodCommand(rawValue: "try")
     }
     
     /// pod选项
@@ -198,7 +194,7 @@ extension Pod.PodCommand {
         public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
         
         /// 资源设置
-        public static func source(_ value: String) -> Self { Self(rawValue: "--sources=\(value)") }
+        public static func sources(_ urls: [String]) -> Self { Self(rawValue: "--sources=\(urls.joined(separator: ","))") }
         /// 不包含某个Pod
         public static func exclude_pods(_ podName: String) -> Self { Self(rawValue: "--exclude-pods=\(podName)") }
         /// 忽略项目缓存，专注pod安装（只限于项目允许增量安装的情况下使用）
@@ -287,7 +283,7 @@ extension Pod.PodCommand {
     }
 }
 
-// MARK: `pod search`
+// MARK: `pod list`
 extension Pod.PodCommand {
     /// 展示所有可用的pod
     public static func list(_ options: [ListOption]? = nil) -> Self {
@@ -302,5 +298,246 @@ extension Pod.PodCommand {
         /// 显示其他统计信息（如 GitHub 观察者和分叉）
         public static let stats = Self(rawValue: "--stats")
         
+    }
+}
+
+// MARK: `pod search`
+extension Pod.PodCommand {
+    /// 下载特定的pod
+    public static func `try`(_ nameOrGitUrl: String, options: [ListOption]? = nil) -> Self {
+        command("try", options: options)
+    }
+    
+    public struct TryOption: PodOptionProtocol {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// Git存储库中podspec文件的名称，如果提供的是GitURL，则此选项才有效
+        public static func podspec_name(_ name: String) -> Self { Self(rawValue: "--podspec_name=\(name)") }
+        /// 不更新仓库
+        public static let no_repo_update = Self(rawValue: "--no-repo-update")
+        
+    }
+}
+
+// MARK: `pod spec xxx`
+extension Pod.PodCommand {
+    /// 管理pod规范
+    public static func spec(_ subCmd: SpecCommand) -> Self {
+        Self(rawValue: ["spec"] + subCmd.rawValue)
+    }
+    
+    public struct SpecCommand: ParameterOption {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        /// 在当前路径下创建podspec
+        public static func create(_ nameOrGithubUrl: String, options: [PodOption]? = nil) -> Self {
+            common("create", options: options, reserve: nameOrGithubUrl)
+        }
+        
+        /// 查找podspec中名称符合query的内容
+        public static func cat(_ query: String, options: [QueryOption]? = nil) -> Self {
+            common("cat", options: options, reserve: query)
+        }
+        
+        /// 查找podspec中名称符合query的路径
+        public static func which(_ query: String, options: [QueryOption]? = nil) -> Self {
+            common("which", options: options, reserve: query)
+        }
+        
+        public struct QueryOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            /// 解析query为正则
+            public static let regex = Self(rawValue: "--regex")
+            /// 展示所有版本
+            public static let show_all = Self(rawValue: "--show-all")
+            /// 打印特定版本
+            public static let version = Self(rawValue: "--version")
+        }
+        
+        /// 打开podspec匹配query的项以编辑
+        public static func edit(_ query: String, options: [EditOption]? = nil) -> Self {
+            common("edit", options: options, reserve: query)
+        }
+        
+        public struct EditOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            /// 解析query为正则
+            public static let regex = Self(rawValue: "--regex")
+            /// 展示所有版本
+            public static let show_all = Self(rawValue: "--show-all")
+        }
+        
+        /// 验证 NAME.podspec。 如果提供了 DIRECTORY，它会验证找到的 podspec 文件，包括子文件夹。 如果参数被省略，它默认为当前工作目录。
+        public static func lint(_ nameOrDirectoryOrPodspecUrl: String, options: [LintOption]? = nil) -> Self {
+            common("lint", options: options, reserve: nameOrDirectoryOrPodspecUrl)
+        }
+        
+        public struct LintOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            /// 跳过需要下载和构建规范的检查
+            public static let quick = Self(rawValue: "--quick")
+            /// 允许展示警告
+            public static let allow_warnings = Self(rawValue: "--allow-warnings")
+            /// 只校验指定的子仓库
+            public static func subspec(_ name: String) -> Self { Self(rawValue: "--subspec=\(name)") }
+            /// 忽略校验子规范
+            public static let no_subspecs = Self(rawValue: "--no-subspecs")
+            /// 完整保留构建目录以供检查
+            public static let no_clean = Self(rawValue: "--no-clean")
+            /// 出现第一个失败的平台或子规范就停止
+            public static let fail_fast = Self(rawValue: "--fail_fast")
+            /// 使用静态库安装
+            public static let use_libraries = Self(rawValue: "--use-libraries")
+            /// 安装过程中使用模块化头
+            public static let use_modular_headers = Self(rawValue: "--use-modular-headers")
+            /// 安装过程使用静态framework
+            public static let use_static_frameworks = Self(rawValue: "--use-static-frameworks")
+            /// 从中提取依赖 Pod 的来源（默认为 https://cdn.cocoapods.org/）
+            public static func sources(_ urls: [String]) -> Self { Self(rawValue: "--sources=\(urls.joined(separator: ","))") }
+            /// 针对特定平台的 lint（默认为 podspec 支持的所有平台）
+            public static func platforms(_ values: [String]) -> Self { Self(rawValue: "--platforms=\(values.joined(separator: ","))") }
+            /// 跳过仅适用于公共规范的检查
+            public static let `private` = Self(rawValue: "--private")
+            /// 应该用于 lint 规范的 SWIFT_VERSION。 这优先于规范或 .swift-version 文件指定的 Swift 版本。
+            public static func swift_version(_ value: String) -> Self { Self(rawValue: "--swift-version=\(value)") }
+            /// 跳过验证 pod 是否可以导入。
+            public static let skip_import_validation = Self(rawValue: "--skip-import-validation")
+            /// Lint 在验证期间跳过构建和运行测试。
+            public static let skip_tests = Self(rawValue: "--skip-tests")
+            /// 要运行的测试仓库列表。
+            public static func test_specs(_ values: [String]) -> Self { Self(rawValue: "--test-specs=\(values.joined(separator: ","))") }
+            /// 使用 Xcode 静态分析工具进行验证。
+            public static let analyze = Self(rawValue: "--analyze")
+            /// 使用给定的配置构建（默认为 Release）。
+            public static func configuration(_ name: String) -> Self { Self(rawValue: "--configuration=\(name)") }
+        }
+    }
+}
+
+// MARK: `pod repo xxx`
+extension Pod.PodCommand {
+    public static func repo(_ subCmd: RepoCommand) -> Self {
+        Self(rawValue: ["repo"] + subCmd.rawValue)
+    }
+    
+    public static func setup(_ options: [PodOption]? = nil) -> Self {
+        command("setup", options: options)
+    }
+    
+    public struct RepoCommand: ParameterOption {
+        public let rawValue: [AnyParameterLiteral]
+        public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+        
+        public static func update(_ name: String? = nil, options: [PodOption]? = nil) -> Self {
+            common("update", options: options, reserve: name)
+        }
+        
+        public static func add(_ name: String, url: String, branch: String? = nil, options: [AddOption]? = nil) -> Self {
+            var reserve = [name, url]
+            if let branch = branch { reserve.append(branch) }
+            return common("add", options: options, reserve: reserve, before: true)
+        }
+        
+        public struct AddOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            public static let progress = Self(rawValue: "--progress")
+        }
+        
+        public static func add_cdn(_ name: String, url: String, options: [PodOption]? = nil) -> Self {
+            common("add-cdn", options: options, reserve: name)
+        }
+        
+        public static func lint(_ nameOrDirectory: String? = nil, options: [LintOption]? = nil) -> Self {
+           common("lint", options: options, reserve: nameOrDirectory)
+        }
+        
+        public struct LintOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            public static let only_errors = Self(rawValue: "--only-errors")
+        }
+        
+        public static func list(_ options: [ListOption]? = nil) -> Self {
+           common("list", options: options)
+        }
+        
+        public struct ListOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            public static let count_only = Self(rawValue: "--count-only")
+        }
+        
+        public static func remove(_ name: String, options: [PodOption]? = nil) -> Self {
+            common("remove", options: options, reserve: name)
+        }
+        
+        public static func push(_ repo: String, podspec: String? = nil, options: [PushOption]? = nil) -> Self {
+           common("push", options: options)
+        }
+        
+        public struct PushOption: PodOptionProtocol {
+            public let rawValue: [AnyParameterLiteral]
+            public init(rawValue: [AnyParameterLiteral]) { self.rawValue = rawValue }
+            
+            /// 允许展示警告
+            public static let allow_warnings = Self(rawValue: "--allow-warnings")
+            /// 使用静态库安装
+            public static let use_libraries = Self(rawValue: "--use-libraries")
+            /// 安装过程中使用模块化头
+            public static let use_modular_headers = Self(rawValue: "--use-modular-headers")
+            /// 从中提取依赖 Pod 的来源（默认为 https://cdn.cocoapods.org/）
+            public static func sources(_ urls: [String]) -> Self { Self(rawValue: "--sources=\(urls.joined(separator: ","))") }
+            /// 不执行将 REPO 推送到其远程的步骤。
+            public static let local_only = Self(rawValue: "--local-only")
+            /// Lint 包括仅适用于公共存储库的检查。
+            public static let no_private = Self(rawValue: "--no-private")
+            /// 跳过验证 pod 是否可以导入。
+            public static let skip_import_validation = Self(rawValue: "--skip-import-validation")
+            /// Lint 在验证期间跳过构建和运行测试。
+            public static let skip_tests = Self(rawValue: "--skip-tests")
+            /// 应该用于 lint 规范的 SWIFT_VERSION。 这优先于规范或 .swift-version 文件指定的 Swift 版本。
+            public static func swift_version(_ value: String) -> Self { Self(rawValue: "--swift-version=\(value)") }
+            
+            
+            /// 只校验指定的子仓库
+            public static func commit_message(_ message: String) -> Self { Self(rawValue: "--commit-message=\"\(message)\"") }
+            /// 完整保留构建目录以供检查
+            public static let no_clean = Self(rawValue: "--no-clean")
+            /// 出现第一个失败的平台或子规范就停止
+            public static let fail_fast = Self(rawValue: "--fail_fast")
+            /// 出现第一个失败的平台或子规范就停止
+            public static let fail_fast = Self(rawValue: "--fail_fast")
+            /*
+
+             --commit-message="Fix bug in pod"
+
+             Add custom commit message. Opens default editor if no commit message is specified.
+
+             --use-json
+
+             Convert the podspec to JSON before pushing it to the repo.
+
+
+             --no-overwrite
+
+             Disallow pushing that would overwrite an existing spec.
+
+             --update-sources
+
+             Make sure sources are up-to-date before a push.
+             */
+        }
     }
 }

@@ -25,6 +25,10 @@
 
 import Foundation
 
+/// 任意参数
+public typealias AnyParameterLiteral = any ParameterLiteral
+
+/// 参数协议，旨在标识参数类型，以区分字符串与路径类型
 public protocol ParameterLiteral {
     func value(_ type: ScriptType) -> String
 }
@@ -35,6 +39,7 @@ extension String: ParameterLiteral {
     }
 }
 
+/// 专用标记路径类型，必要的情况下根据`ScriptType`作处理
 public enum PathLiteral: ParameterLiteral {
     /// 不做任何变更的数据
     case raw(String)
@@ -42,24 +47,36 @@ public enum PathLiteral: ParameterLiteral {
     case path(String)
     /// 部分内容为路径的
     case part(part: String, path: String)
+    /// 双引号引用
+    case doubleQuote(part: String, content: String)
     
     public func value(_ type: ScriptType) -> String {
         switch self {
         case .raw(let string): return string
-        case .path(let string): return convert(string, type: type)
-        case .part(part: let content, path: let path): return content + convert(path, type: type)
-            
+        case .path(let string):
+            return convert(string, type: type, quote: .single)
+        case .part(part: let part, path: let content):
+            return part + convert(content, type: type, quote: .single)
+        case .doubleQuote(part: let part, content: let content):
+            return part + convert(content, type: type, quote: .backslashDouble)
         }
     }
     
-    private func convert(_ path: String, type: ScriptType) -> String {
-        type.isApple ? path.appleScriptPath : path
+    private func convert(_ value: String, type: ScriptType, quote: String.Quote) -> String {
+        switch quote {
+        case .single:
+            
+        case .double:
+            
+        case .backslashDouble:
+            
+        }
+        type.isApple ? value.quote(quote) : value
     }
 }
 
-public typealias AnyParameterLiteral = any ParameterLiteral
-
 extension [AnyParameterLiteral] {
+    /// `[AnyParameterLiteral] -> [String]`
     public func strings(_ type: ScriptType) -> [String] {
         compactMap({ $0.value(type) })
     }
@@ -72,4 +89,39 @@ public protocol ParameterOption {
 
 extension ParameterOption {
     public init(rawValue: AnyParameterLiteral...) { self.init(rawValue: rawValue) }
+    
+    /// 通用构建
+    /// - Parameters:
+    ///   - specific: 标识
+    ///   - options: 可选项
+    ///   - reserve: 保留位
+    ///   - before: 保留是否需要在可选项之前，默认false
+    /// - Returns: `Self`
+    static func common<T>(
+        _ specific: String,
+        options: [T]? = nil,
+        reserve: [String]? = nil,
+        before: Bool = false
+    ) -> Self where T: ParameterOption {
+        var ret: [AnyParameterLiteral] = [specific]
+        
+        if let options = options, !options.isEmpty {
+            ret.append(contentsOf: options.compactMap({ $0.rawValue }).flatMap({ $0 }))
+        }
+        if let reserve = reserve, !reserve.isEmpty {
+            before ? ret.insert(contentsOf: reserve, at: 1) : ret.append(contentsOf: reserve)
+        }
+        
+        return Self(rawValue: ret)
+    }
+    
+    static func common<T>(
+        _ specific: String,
+        options: [T]? = nil,
+        reserve: String?,
+        before: Bool = false
+    ) -> Self where T: PodOptionProtocol {
+        guard let reserve = reserve else { return common(specific, options: options, before: before) }
+        return common(specific, options: options, reserve: [reserve], before: before)
+    }
 }
