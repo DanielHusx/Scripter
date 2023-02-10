@@ -63,14 +63,14 @@ public enum PathLiteral: ParameterLiteral {
     }
     
     private func convert(_ value: String, type: ScriptType, quote: String.Quote) -> String {
-        switch quote {
-        case .single:
-            
-        case .double:
-            
-        case .backslashDouble:
-            
-        }
+//        switch quote {
+//        case .single:
+//
+//        case .double:
+//
+//        case .backslashDouble:
+//
+//        }
         type.isApple ? value.quote(quote) : value
     }
 }
@@ -86,6 +86,26 @@ public protocol ParameterOption {
     var rawValue: [AnyParameterLiteral] { get }
     init(rawValue: [AnyParameterLiteral])
 }
+
+public protocol ParameterOption1 {
+    var rawValue: [ParameterLiteral] { get }
+    init(rawValue: [ParameterLiteral])
+}
+
+public struct KKK: ParameterOption1 {
+    public let rawValue: [ParameterLiteral]
+    
+    public init(rawValue: [ParameterLiteral]) {
+        self.rawValue = rawValue
+    }
+    
+    public init(rawValue: ParameterLiteral...) {
+        self.rawValue = rawValue
+    }
+    
+    public static let a = Self(rawValue: "1", PathLiteral.raw(""), "2")
+}
+
 
 extension ParameterOption {
     public init(rawValue: AnyParameterLiteral...) { self.init(rawValue: rawValue) }

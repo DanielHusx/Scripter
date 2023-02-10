@@ -518,7 +518,7 @@ extension Pod.PodCommand {
             /// 出现第一个失败的平台或子规范就停止
             public static let fail_fast = Self(rawValue: "--fail_fast")
             /// 出现第一个失败的平台或子规范就停止
-            public static let fail_fast = Self(rawValue: "--fail_fast")
+//            public static let fail_fast = Self(rawValue: "--fail_fast")
             /*
 
              --commit-message="Fix bug in pod"
